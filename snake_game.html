@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+<title>스네이크 게임</title>
+<style>
+  :root{--bg:#071322;--panel:#0f1724;--accent:#22ff88;--border:#9ca3af}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#04101b);color:#e6eef8;font-family:Inter,system-ui,Arial}
+  .wrap{min-height:100%;display:flex;flex-direction:column;align-items:center;padding:18px;gap:12px}
+  h1{margin:8px 0;font-size:18px}
+  .board{width:calc(min(640px,92vw));}
+  canvas{width:100%;height:auto;border-radius:12px;border:4px solid var(--border);background:#050910;display:block}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px}
+  button{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);color:inherit;font-weight:600}
+  .meta{display:flex;gap:12px;justify-content:center;align-items:center}
+  .touchpad{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:8px;touch-action:none}
+  .row{display:flex;gap:8px}
+  .touch-btn{width:64px;height:64px;border-radius:12px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none}
+  .small{font-size:13px;opacity:0.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>스네이크</h1>
+  <div class="board">
+    <canvas id="game" width="480" height="480"></canvas>
+    <div class="controls">
+      <button id="startBtn">시작</button>
+      <button id="pauseBtn">일시정지</button>
+      <button id="resetBtn">초기화</button>
+      <button id="muteBtn">소리 끄기</button>
+      <button id="installBtn" style="display:none">앱으로 설치</button>
+    </div>
+    <div class="meta small">점수: <strong id="score">0</strong> &nbsp;|&nbsp; 최고: <strong id="best">0</strong></div>
+    <div id="touchpad" class="touchpad">
+      <div class="row"><div class="touch-btn" data-dir="up">▲</div></div>
+      <div class="row">
+        <div class="touch-btn" data-dir="left">◀</div>
+        <div class="touch-btn" data-dir="down">▼</div>
+        <div class="touch-btn" data-dir="right">▶</div>
+      </div>
+    </div>
+  </div>
+  <div class="small">이 파일 하나로: 오프라인, 설치(PWA), 여러 탭 동기화(local) 지원.</div>
+</div>
+
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const CELL=20;
+const scoreEl=document.getElementById('score');
+const bestEl=document.getElementById('best');
+const startBtn=document.getElementById('startBtn');
+const pauseBtn=document.getElementById('pauseBtn');
+const resetBtn=document.getElementById('resetBtn');
+const muteBtn=document.getElementById('muteBtn');
+const installBtn=document.getElementById('installBtn');
+const touchpad=document.getElementById('touchpad');
+
+let cols,rows;
+let snake,dir,nextDir,apple,score=0,best=0,
+    running=false,speed=8,lastMove=0,muted=false;
+
+let gameOver=false; // ← 버그 수정용 (UI 영향 없음)
+
+/* ---------- canvas size ---------- */
+function resizeCanvas(){
+  const style=getComputedStyle(canvas);
+  const w=parseFloat(style.width);
+  canvas.width=Math.floor(w);
+  canvas.height=Math.floor(w);
+  cols=Math.max(10,Math.floor(canvas.width/CELL));
+  rows=Math.max(10,Math.floor(canvas.height/CELL));
+}
+window.addEventListener('resize',()=>{resizeCanvas();draw();});
+
+/* ---------- game logic ---------- */
+function reset(announce=true){
+  snake=[{x:Math.floor(cols/2),y:Math.floor(rows/2)}];
+  dir={x:1,y:0};
+  nextDir={x:1,y:0};
+  placeApple();
+  score=0;
+  speed=8;
+  running=false;
+  gameOver=false; // ← 사망 상태 초기화
+  lastMove=0;
+  updateScore();
+  if(announce) draw();
+}
+
+function placeApple(){
+  while(true){
+    const x=Math.floor(Math.random()*cols);
+    const y=Math.floor(Math.random()*rows);
+    if(!snake.some(s=>s.x===x&&s.y===y)){ apple={x,y}; return; }
+  }
+}
+
+function updateScore(){
+  scoreEl.textContent=score;
+  best=Math.max(best||0,score);
+  bestEl.textContent=best;
+  localStorage.setItem('snake_best',best);
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#050910';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.strokeStyle='var(--border)';
+  ctx.lineWidth=4;
+  ctx.strokeRect(2,2,canvas.width-4,canvas.height-4);
+
+  const cellW=canvas.width/cols;
+  const cellH=canvas.height/rows;
+  const cell=Math.min(cellW,cellH);
+
+  ctx.fillStyle='#ff355e';
+  ctx.fillRect(apple.x*cell+2,apple.y*cell+2,cell-4,cell-4);
+
+  /* ===== snake (원본 그대로) ===== */
+  for(let i=0;i<snake.length;i++){
+    const s=snake[i];
+    ctx.fillStyle = i===0
+      ? '#22ff88'
+      : `rgba(74,222,128,${0.7 - i/snake.length*0.5})`;
+    ctx.fillRect(s.x*cell+1, s.y*cell+1, cell-2, cell-2);
+  }
+}
+
+function step(){
+  const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+  if(
+    head.x<0||head.x>=cols||
+    head.y<0||head.y>=rows||
+    snake.some(s=>s.x===head.x&&s.y===head.y)
+  ){
+    running=false;
+    gameOver=true; // ← 부활 버그 차단
+    startBtn.textContent='다시 시작';
+    return;
+  }
+  snake.unshift(head);
+  if(head.x===apple.x&&head.y===apple.y){
+    score++;
+    if(score%5===0) speed+=0.5;
+    placeApple();
+    updateScore();
+  }else snake.pop();
+}
+
+function loop(ts){
+  if(!lastMove) lastMove=ts;
+  if(running && ts-lastMove>1000/speed){
+    if(nextDir.x!==-dir.x||nextDir.y!==-dir.y) dir=nextDir;
+    step();
+    lastMove=ts;
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- input ---------- */
+window.addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='arrowleft'||k==='a') nextDir={x:-1,y:0};
+  if(k==='arrowright'||k==='d') nextDir={x:1,y:0};
+  if(k==='arrowup'||k==='w') nextDir={x:0,y:-1};
+  if(k==='arrowdown'||k==='s') nextDir={x:0,y:1};
+  if(k==='p' && !gameOver) running=!running;
+});
+
+touchpad.addEventListener('click',e=>{
+  const d=e.target.dataset.dir;
+  if(d==='left') nextDir={x:-1,y:0};
+  if(d==='right') nextDir={x:1,y:0};
+  if(d==='up') nextDir={x:0,y:-1};
+  if(d==='down') nextDir={x:0,y:1};
+});
+
+/* ---------- buttons ---------- */
+startBtn.addEventListener('click',()=>{
+  if(!running){
+    reset(false);
+    running=true;
+    startBtn.textContent='실행 중';
+  }else{
+    running=false;
+    startBtn.textContent='다시 시작';
+  }
+});
+
+pauseBtn.addEventListener('click',()=>{
+  if(gameOver) return;
+  running=!running;
+  pauseBtn.textContent=running?'일시정지':'재개';
+});
+
+resetBtn.addEventListener('click',()=>{
+  localStorage.removeItem('snake_best');
+  best=0;
+  bestEl.textContent=0;
+  reset();
+});
+
+/* ---------- start ---------- */
+best=parseInt(localStorage.getItem('snake_best')||'0',10)||0;
+bestEl.textContent=best;
+
+resizeCanvas();
+reset(false);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
